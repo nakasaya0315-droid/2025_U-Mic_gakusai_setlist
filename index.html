@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>学園祭ライブ | セットリスト表示</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { margin:0; font-family:'Segoe UI',sans-serif; color:#fff; text-align:center; padding:15px; font-size:16px;}
+body.day1 { background: linear-gradient(135deg, #ff8c00, #ff3c78, #ffd700); }
+body.day2 { background: linear-gradient(0deg,#e5d971,#b4d76c,#57ac67); }
+body.stage { background: linear-gradient(135deg, #000 0%, #000 50%, #d4af37 50%, #d4af37 80%, #fff 80%, #fff 90%, #ff0000 90%, #ff0000 100%); }
+h1{font-size:1.8em;margin-bottom:10px;}
+#current{font-size:1.4em;margin-top:15px;}
+#next{font-size:1.2em;margin-top:10px;}
+.card{ background: rgba(255,255,255,0.15); backdrop-filter: blur(10px); padding:15px; border-radius:15px; max-width:100%; margin:0 auto;}
+select{ width:100%; padding:8px; font-size:1.2em; border-radius:8px; border:none; margin-top:8px;}
+.table-container { overflow-x:auto; margin-top:15px; }
+table { width:100%; border-collapse:collapse; color:#000; background: rgba(255,255,255,0.85); border-radius:8px; overflow:hidden;}
+td,th { padding:8px; border-bottom:1px solid rgba(0,0,0,0.08); text-align:left; white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1>学園祭ライブ セットリスト</h1>
+
+<div class="card">
+  <p>日付を選択：</p>
+  <select id="daySelect">
+    <option value="Day1">Day1</option>
+    <option value="Day2">Day2</option>
+    <option value="ステージ発表">ステージ発表</option>
+  </select>
+  <div id="current">読み込み中...</div>
+  <div id="next"></div>
+  <div class="table-container"><table id="table"></table></div>
+</div>
+
+<script>
+// ======= 設定 =======
+const SHEET_ID = "1V0cVVTlYwR1QigjIL1OG2F62f7btDg_GiWhdqBq6Aq4";
+const DAY1_DATE = "2025-11-22";
+const DAY2_DATE = "2025-11-23";
+const LIVE_END_MINUTES = 16*60+30; // 16:30
+const STAGE_START_MINUTES = 14*60+30; // 15:00
+
+// ▼ テストモード設定
+const TEST_MODE = false; // ← trueでテストモードON
+const TEST_DATE = "2025-11-24 14:30"; // ← テストしたい日時をここで指定
+
+function getNow(){
+    if(TEST_MODE){
+        const [date,time]=TEST_DATE.split(" ");
+        const [y,m,d]=date.split("-").map(Number);
+        const [hh,mm]=time.split(":").map(Number);
+        return new Date(y,m-1,d,hh,mm);
+    }
+    return new Date();
+}
+
+function autoSelectSheet() {
+    let now = getNow();
+    const todayStr = now.toISOString().split("T")[0];
+    let sheet = "Day1";
+    if(todayStr===DAY1_DATE) sheet="Day1";
+    else if(todayStr===DAY2_DATE){
+        const min = now.getHours()*60 + now.getMinutes();
+        sheet = (min>=STAGE_START_MINUTES) ? "ステージ発表" : "Day2";
+    }
+    document.getElementById("daySelect").value = sheet;
+    setBackground(sheet);
+    load(sheet, now);
+}
+
+function setBackground(mode){
+    const body=document.body;
+    body.classList.remove("day1","day2","stage");
+    if(mode==="Day1") body.classList.add("day1");
+    else if(mode==="Day2") body.classList.add("day2");
+    else if(mode==="ステージ発表") body.classList.add("stage");
+}
+
+function load(day, now){
+    const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${day}`;
+    fetch(url)
+      .then(r=>r.text())
+      .then(t=>render(t, day, now))
+      .catch(()=>{ document.getElementById("current").innerText="読み込み失敗"; });
+}
+
+function processNormal(rows, currentMinutes){
+    let current=null, next=null;
+    rows.forEach(r=>{
+        const [t,band,song]=r; if(!t) return;
+        const start=parseInt(t.split(":")[0])*60 + parseInt(t.split(":")[1]);
+        if(start<=currentMinutes) current={time:t,band,song};
+        else if(!next) next={time:t,band,song};
+    });
+
+    if(current && current.band==="休憩時間"){ 
+        current.band="休憩中"; current.song="";
+        for(let i=0;i<rows.length;i++){ 
+            const [t,b,s]=rows[i]; 
+            if(parseInt(t.split(":")[0])*60+parseInt(t.split(":")[1])>currentMinutes && b!=="休憩時間"){
+                next={time:t,band:b,song:s}; break;
+            }
+        }
+    }
+
+    let text="", nextText="";
+    if(current){
+        if(current.band==="休憩中") text+="🛋️ 現在：休憩中<br>";
+        else text+=`🎵 現在演奏中：${current.song}<br>バンド名: ${current.band}<br>`;
+    } else text+="始まりまでお待ちください。<br>";
+
+    if(next){
+        if(next.band==="休憩時間") nextText=`⏭️ 次：休憩時間<br>休憩開始予定時刻: ${next.time}〜`;
+        else nextText=`⏭️ 次の演奏曲：${next.song}<br>バンド名: ${next.band}<br>次のバンドの開始予定時刻: ${next.time}〜`;
+    } else nextText="⏭️ 次の演奏予定：なし";
+
+    document.getElementById("current").innerHTML=text;
+    document.getElementById("next").innerHTML=nextText;
+}
+
+function render(csv, dayLabel, now){
+    const lines=csv.trim().split(/\r?\n/).map(l=>l.split(","));
+    const header=lines[0].map(c=>c.replace(/^"|"$/g,""));
+    const rows=lines.slice(1).map(r=>r.map(c=>c.replace(/^"|"$/g,"")));
+
+    let html="<tr>"; header.forEach(h=>html+=`<th>${h}</th>`); html+="</tr>";
+    rows.forEach(r=>{ html+="<tr>"; r.forEach(c=>html+=`<td>${c}</td>`); html+="</tr>"; });
+    document.getElementById("table").innerHTML=html;
+
+    const todayStr = now.toISOString().split("T")[0];
+    const currentMinutes=now.getHours()*60 + now.getMinutes();
+    const parseTimeToMinutes = t=>{ const [h,m]=t.split(":").map(Number); return h*60+m; };
+    const formatHHMM = min=>{ const h=Math.floor(min/60); const m=min%60; return `${h}:${m.toString().padStart(2,"0")}`; };
+    const firstRow = rows[0], lastRow = rows[rows.length-1];
+    const startMinutes = firstRow?parseTimeToMinutes(firstRow[0]):0;
+    const endMinutes = lastRow?parseTimeToMinutes(lastRow[0])+8:0;
+
+    // 準備中
+    if(todayStr < DAY1_DATE && dayLabel==="Day1"){
+        document.getElementById("current").innerText="準備中です。開始時刻 11/22 10:00までお待ちください。";
+        document.getElementById("next").innerText=""; return;
+    }
+    if(todayStr < DAY2_DATE && (dayLabel==="Day2" || dayLabel==="ステージ発表")){
+        const msg = (dayLabel==="Day2") ? "11/23 10:00" : "11/23 15:00";
+        document.getElementById("current").innerText=`準備中です。開始時刻 ${msg}までお待ちください。`;
+        document.getElementById("next").innerText=""; return;
+    }
+    if(todayStr > DAY2_DATE){
+        document.getElementById("current").innerText="2025年学園祭ライブは終了しました！ありがとうございました！";
+        document.getElementById("next").innerText=""; return;
+    }
+
+    // 当日開始前
+    if(dayLabel==="Day1" && todayStr===DAY1_DATE && currentMinutes<startMinutes){
+        document.getElementById("current").innerText=`準備中です。開始時刻 ${formatHHMM(startMinutes)}までお待ちください。`;
+        document.getElementById("next").innerText=""; return;
+    }
+    if(dayLabel==="Day2" && todayStr===DAY2_DATE && currentMinutes<startMinutes){
+        document.getElementById("current").innerText=`準備中です。開始時刻 ${formatHHMM(startMinutes)}までお待ちください。`;
+        document.getElementById("next").innerText=""; return;
+    }
+    if(dayLabel==="ステージ発表" && todayStr===DAY2_DATE && currentMinutes<(15*60)){
+        document.getElementById("current").innerText=`準備中です。開始時刻 15:00までお待ちください。`;
+        document.getElementById("next").innerText=""; return;
+    }
+
+// Day1選択時、11/22の演奏終了後 または 11/23のステージ終了前
+if(dayLabel==="Day1" && (
+    (todayStr===DAY1_DATE && currentMinutes>=endMinutes) ||
+    (todayStr===DAY2_DATE && currentMinutes<LIVE_END_MINUTES)
+)){
+    document.getElementById("current").innerText="1日目のライブは終了しました。";
+    document.getElementById("next").innerText="";
+    return;
+}
+
+// Day2選択時、11/23の演奏終了後～ステージ終了前
+if(dayLabel==="Day2" && todayStr===DAY2_DATE && currentMinutes>=endMinutes && currentMinutes<LIVE_END_MINUTES){
+    document.getElementById("current").innerText="2日目のストリートライブは終了しました。";
+    document.getElementById("next").innerText="";
+    return;
+}
+
+// ステージ発表終了後（共通）
+if(currentMinutes>=LIVE_END_MINUTES){
+    document.getElementById("current").innerText="2025年学園祭ライブは終了しました！ありがとうございました！";
+    document.getElementById("next").innerText="";
+    return;
+}
+    processNormal(rows, currentMinutes);
+}
+
+document.getElementById("daySelect").onchange=e=>{
+    const v=e.target.value;
+    setBackground(v);
+    load(v, getNow());
+};
+
+autoSelectSheet();
+setInterval(() => { autoSelectSheet(); }, 30000);
+</script>
+</body>
+</html>

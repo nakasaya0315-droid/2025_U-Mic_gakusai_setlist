@@ -85,7 +85,12 @@ function autoSelectSheet() {
     let now = getNow();
     let sheet;
 
-    if (firstLoad) {
+    const savedSheet = sessionStorage.getItem('selectedSheet');
+
+    if (savedSheet) {
+        sheet = savedSheet; // 保存された値を優先
+        firstLoad = false;
+    } else if (firstLoad) {
         // 初回だけ自動選択
         const todayStr = now.toISOString().split("T")[0];
         if (todayStr === DAY1_DATE) {
@@ -94,14 +99,19 @@ function autoSelectSheet() {
             const min = now.getHours() * 60 + now.getMinutes();
             sheet = (min >= STAGE_START_MINUTES) ? "ステージ発表" : "Day2";
         } else {
-            sheet = "Day1"; // デフォルト
+            sheet = "Day1";
         }
-        document.getElementById("daySelect").value = sheet;
-        firstLoad = false; // 以降は自動切り替えしない
+        firstLoad = false;
     } else {
-        // 2回目以降は現在選択されているシートを維持
         sheet = document.getElementById("daySelect").value;
     }
+
+    document.getElementById("daySelect").value = sheet;
+    setBackground(sheet);
+
+    load(sheet, now).then(() => {
+        window.scrollTo(0, scrollY);
+    });
 
     setBackground(sheet);
 

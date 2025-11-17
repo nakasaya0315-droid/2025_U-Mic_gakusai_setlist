@@ -44,7 +44,7 @@ const STAGE_START_MINUTES = 14*60+30; // 15:00
 
 // ▼ テストモード設定
 const TEST_MODE = false; // ← trueでテストモードON
-const TEST_DATE = "2025-11-22 14:30"; // ← テストしたい日時をここで指定
+const TEST_DATE = "2025-11-22 15:30"; // ← テストしたい日時をここで指定
 
 function getNow(){
     if(TEST_MODE){
@@ -56,31 +56,6 @@ function getNow(){
     return new Date();
 }
 
-// 自動でシートを選択し、スクロール位置を保持する関数
-function autoSelectSheet() {
-    // 現在のスクロール位置を記録
-    const scrollY = window.scrollY;
-
-    let now = getNow();
-    const todayStr = now.toISOString().split("T")[0];
-    let sheet = "Day1";
-
-    if (todayStr === DAY1_DATE) {
-        sheet = "Day1";
-    } else if (todayStr === DAY2_DATE) {
-        const min = now.getHours() * 60 + now.getMinutes();
-        sheet = (min >= STAGE_START_MINUTES) ? "ステージ発表" : "Day2";
-    }
-
-    // セレクトボックスと背景を更新
-    document.getElementById("daySelect").value = sheet;
-    setBackground(sheet);
-
-    // データ読み込み後にスクロール位置を復元
-    load(sheet, now).then(() => {
-        window.scrollTo(0, scrollY);
-    });
-}
 
 function setBackground(mode){
     const body=document.body;
@@ -91,17 +66,48 @@ function setBackground(mode){
 }
 
 
-// Googleスプレッドシートからデータを読み込む関数（Promise対応）
+let firstLoad = true; // 初回判定フラグ
+
 function load(day, now) {
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${day}`;
     return fetch(url)
         .then(r => r.text())
         .then(t => {
-            render(t, day, now); // データを描画
+            render(t, day, now);
         })
         .catch(() => {
             document.getElementById("current").innerText = "読み込み失敗";
         });
+}
+
+function autoSelectSheet() {
+    const scrollY = window.scrollY;
+    let now = getNow();
+    let sheet;
+
+    if (firstLoad) {
+        // 初回だけ自動選択
+        const todayStr = now.toISOString().split("T")[0];
+        if (todayStr === DAY1_DATE) {
+            sheet = "Day1";
+        } else if (todayStr === DAY2_DATE) {
+            const min = now.getHours() * 60 + now.getMinutes();
+            sheet = (min >= STAGE_START_MINUTES) ? "ステージ発表" : "Day2";
+        } else {
+            sheet = "Day1"; // デフォルト
+        }
+        document.getElementById("daySelect").value = sheet;
+        firstLoad = false; // 以降は自動切り替えしない
+    } else {
+        // 2回目以降は現在選択されているシートを維持
+        sheet = document.getElementById("daySelect").value;
+    }
+
+    setBackground(sheet);
+
+    load(sheet, now).then(() => {
+        window.scrollTo(0, scrollY);
+    });
 }
 
 
@@ -218,7 +224,7 @@ document.getElementById("daySelect").onchange=e=>{
 };
 
 autoSelectSheet();
-setInterval(() => { autoSelectSheet(); }, 30000);
+setInterval(() => { autoSelectSheet(); }, 3000);
 </script>
 </body>
 </html>
